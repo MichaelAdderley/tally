@@ -29,8 +29,6 @@ function TopNav({ onNavigate, currentView }) {
       <div className="flex gap-6 items-center">
         <span className={`text-sm cursor-pointer ${currentView === 'dashboard' ? 'font-semibold text-white/85' : 'text-white/45 hover:text-white/65'}`} onClick={() => onNavigate('dashboard')}>Dashboard</span>
         <span className="text-sm text-white/45">Reports</span>
-        <span className="text-sm text-white/45">Settings</span>
-        <div className="w-8 h-8 rounded-full bg-[#2a2a2a]" />
       </div>
     </div>
   )
