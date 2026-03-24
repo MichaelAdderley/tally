@@ -52,7 +52,7 @@ function TopNav({ onNavigate, currentView }) {
   return (
     <div className="bg-[#1e1e1e] border-b border-[#2a2a2a] flex h-16 items-center justify-between px-10 shrink-0">
       <div className="flex gap-2.5 items-center cursor-pointer" onClick={() => onNavigate('dashboard')}>
-        <img src="/tally-logo.svg" alt="tally logo" className="w-7 h-7" />
+        <img src={`${import.meta.env.BASE_URL}tally-logo.svg`} alt="tally logo" className="w-7 h-7" />
         <span className="font-bold text-xl text-white/90">tally</span>
       </div>
       <div className="flex gap-6 items-center">
