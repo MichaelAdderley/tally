@@ -1,36 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { supabase } from './supabaseClient'
 
 const PROJECT_COLORS = ['#6c5ce7', '#e17055', '#00b894', '#0984e3', '#fdcb6e', '#a29bfe', '#fd79a8']
-
-const INITIAL_PROJECTS = [
-  { id: 1, name: 'Website Redesign', budget: 80, color: '#6c5ce7', description: 'Full website overhaul', logs: [
-    { id: 1, date: '2026-03-24', hours: 1.4, note: 'Timer - Homepage layout', fromTimer: true },
-    { id: 2, date: '2026-03-23', hours: 3.5, note: 'Navigation component', fromTimer: false },
-    { id: 3, date: '2026-03-22', hours: 5.0, note: 'Design system setup', fromTimer: false },
-    { id: 4, date: '2026-03-21', hours: 2.5, note: 'Wireframe review', fromTimer: false },
-    { id: 5, date: '2026-03-20', hours: 4.0, note: 'Client meeting & revisions', fromTimer: false },
-    { id: 6, date: '2026-03-19', hours: 6.0, note: 'Homepage mockups v2', fromTimer: true },
-    { id: 7, date: '2026-03-18', hours: 3.0, note: 'Color palette exploration', fromTimer: false },
-  ]},
-  { id: 2, name: 'Mobile App MVP', budget: 120, color: '#e17055', description: '', logs: [
-    { id: 8, date: '2026-03-23', hours: 4.0, note: 'Auth flow implementation', fromTimer: false },
-    { id: 9, date: '2026-03-22', hours: 5.0, note: 'API integration', fromTimer: true },
-    { id: 10, date: '2026-03-20', hours: 80.0, note: 'Core features sprint', fromTimer: false },
-  ]},
-  { id: 3, name: 'Brand Guidelines', budget: 40, color: '#00b894', description: '', logs: [
-    { id: 11, date: '2026-03-22', hours: 6.0, note: 'Typography research', fromTimer: false },
-    { id: 12, date: '2026-03-21', hours: 6.0, note: 'Logo concepts', fromTimer: true },
-  ]},
-  { id: 4, name: 'API Integration', budget: 60, color: '#0984e3', description: '', logs: [
-    { id: 13, date: '2026-03-23', hours: 8.0, note: 'REST endpoints', fromTimer: false },
-    { id: 14, date: '2026-03-22', hours: 8.5, note: 'Authentication layer', fromTimer: true },
-    { id: 15, date: '2026-03-21', hours: 8.0, note: 'Rate limiting setup', fromTimer: false },
-  ]},
-  { id: 5, name: 'Marketing Campaign', budget: 20, color: '#fdcb6e', description: '', logs: [
-    { id: 16, date: '2026-03-22', hours: 3.5, note: 'Social media assets', fromTimer: false },
-    { id: 17, date: '2026-03-21', hours: 3.0, note: 'Email templates', fromTimer: false },
-  ]},
-]
 
 function getUsedHours(project) {
   return project.logs.reduce((sum, l) => sum + l.hours, 0)
@@ -205,40 +176,45 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
     return () => clearInterval(intervalRef.current)
   }, [timerRunning])
 
-  const handleStopTimer = () => {
+  const handleStopTimer = async () => {
     setTimerRunning(false)
     if (timerSeconds > 0) {
       const hours = Math.round((timerSeconds / 3600) * 10) / 10
       if (hours > 0) {
-        const newLog = {
-          id: Date.now(),
-          date: new Date().toISOString().slice(0, 10),
-          hours,
-          note: 'Timer session',
-          fromTimer: true,
+        const { data: row, error } = await supabase
+          .from('time_logs')
+          .insert({ project_id: project.id, date: new Date().toISOString().slice(0, 10), hours, note: 'Timer session', from_timer: true })
+          .select()
+          .single()
+        if (!error) {
+          const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer }
+          onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
         }
-        onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
       }
       setTimerSeconds(0)
     }
   }
 
-  const handleAddEntry = () => {
+  const handleAddEntry = async () => {
     if (!entryHours || parseFloat(entryHours) <= 0) return
-    const newLog = {
-      id: Date.now(),
-      date: entryDate,
-      hours: parseFloat(entryHours),
-      note: entryNote || 'Manual entry',
-      fromTimer: false,
+    const { data: row, error } = await supabase
+      .from('time_logs')
+      .insert({ project_id: project.id, date: entryDate, hours: parseFloat(entryHours), note: entryNote || 'Manual entry', from_timer: false })
+      .select()
+      .single()
+    if (!error) {
+      const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer }
+      onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
+      setEntryHours('')
+      setEntryNote('')
     }
-    onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
-    setEntryHours('')
-    setEntryNote('')
   }
 
-  const handleDeleteLog = (logId) => {
-    onUpdateProject({ ...project, logs: project.logs.filter(l => l.id !== logId) })
+  const handleDeleteLog = async (logId) => {
+    const { error } = await supabase.from('time_logs').delete().eq('id', logId)
+    if (!error) {
+      onUpdateProject({ ...project, logs: project.logs.filter(l => l.id !== logId) })
+    }
   }
 
   return (
@@ -462,31 +438,52 @@ function Dashboard({ projects, onView, onEdit, onDelete, onNew }) {
   )
 }
 
-function loadProjects() {
-  try {
-    const saved = localStorage.getItem('tally-projects')
-    if (saved) return JSON.parse(saved)
-  } catch {}
-  return INITIAL_PROJECTS
-}
-
 export default function App() {
-  const [projects, setProjects] = useState(loadProjects)
+  const [projects, setProjects] = useState([])
+  const [loading, setLoading] = useState(true)
   const [view, setView] = useState('dashboard')
   const [selectedProject, setSelectedProject] = useState(null)
   const [modal, setModal] = useState(null)
   const [modalProject, setModalProject] = useState(null)
 
-  const nextId = useRef(
-    projects.reduce((max, p) => {
-      const maxLogId = p.logs.reduce((m, l) => Math.max(m, l.id), 0)
-      return Math.max(max, p.id, maxLogId)
-    }, 0) + 1
-  )
+  const fetchProjects = useCallback(async () => {
+    setLoading(true)
+    const { data: projectRows, error: pErr } = await supabase
+      .from('projects')
+      .select('*')
+      .order('id')
+
+    if (pErr) { console.error(pErr); setLoading(false); return }
+
+    const { data: logRows, error: lErr } = await supabase
+      .from('time_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (lErr) { console.error(lErr); setLoading(false); return }
+
+    const logsByProject = {}
+    for (const log of logRows) {
+      const mapped = { id: log.id, date: log.date, hours: Number(log.hours), note: log.note, fromTimer: log.from_timer }
+      ;(logsByProject[log.project_id] ||= []).push(mapped)
+    }
+
+    const merged = projectRows.map(p => ({
+      id: p.id,
+      name: p.name,
+      budget: Number(p.budget),
+      color: p.color,
+      description: p.description,
+      logs: logsByProject[p.id] || [],
+    }))
+
+    setProjects(merged)
+    setLoading(false)
+  }, [])
 
   useEffect(() => {
-    localStorage.setItem('tally-projects', JSON.stringify(projects))
-  }, [projects])
+    fetchProjects()
+  }, [fetchProjects])
 
   const handleView = useCallback((p) => {
     setSelectedProject(p)
@@ -508,26 +505,42 @@ export default function App() {
     setModal('create')
   }, [])
 
-  const handleSave = useCallback((data) => {
+  const handleSave = useCallback(async (data) => {
     if (modal === 'create') {
-      const newProject = { ...data, id: nextId.current++, logs: [] }
-      setProjects(prev => [...prev, newProject])
+      const { data: row, error } = await supabase
+        .from('projects')
+        .insert({ name: data.name, budget: data.budget, description: data.description, color: data.color })
+        .select()
+        .single()
+      if (!error) {
+        const newProject = { id: row.id, name: row.name, budget: Number(row.budget), color: row.color, description: row.description, logs: [] }
+        setProjects(prev => [...prev, newProject])
+      }
     } else if (modal === 'edit' && modalProject) {
-      setProjects(prev => prev.map(p => p.id === modalProject.id ? { ...p, ...data } : p))
-      if (selectedProject?.id === modalProject.id) {
-        setSelectedProject(prev => prev ? { ...prev, ...data } : prev)
+      const { error } = await supabase
+        .from('projects')
+        .update({ name: data.name, budget: data.budget, description: data.description, color: data.color })
+        .eq('id', modalProject.id)
+      if (!error) {
+        setProjects(prev => prev.map(p => p.id === modalProject.id ? { ...p, ...data } : p))
+        if (selectedProject?.id === modalProject.id) {
+          setSelectedProject(prev => prev ? { ...prev, ...data } : prev)
+        }
       }
     }
     setModal(null)
     setModalProject(null)
   }, [modal, modalProject, selectedProject])
 
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(async () => {
     if (modalProject) {
-      setProjects(prev => prev.filter(p => p.id !== modalProject.id))
-      if (selectedProject?.id === modalProject.id) {
-        setView('dashboard')
-        setSelectedProject(null)
+      const { error } = await supabase.from('projects').delete().eq('id', modalProject.id)
+      if (!error) {
+        setProjects(prev => prev.filter(p => p.id !== modalProject.id))
+        if (selectedProject?.id === modalProject.id) {
+          setView('dashboard')
+          setSelectedProject(null)
+        }
       }
     }
     setModal(null)
@@ -545,7 +558,9 @@ export default function App() {
     <div className="bg-[#191919] flex flex-col min-h-screen max-w-[1440px] mx-auto w-full">
       <TopNav onNavigate={(v) => { setView(v); if (v === 'dashboard') setSelectedProject(null) }} currentView={view} />
 
-      {view === 'dashboard' ? (
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-white/40 text-sm">Loading...</div>
+      ) : view === 'dashboard' ? (
         <Dashboard projects={projects} onView={handleView} onEdit={handleEdit} onDelete={handleDelete} onNew={handleNew} />
       ) : (
         currentProject && (
