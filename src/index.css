@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfAZ9hiA.woff2) format('woff2');
+}
+
+html, body {
+  font-family: 'Inter', sans-serif;
+  background: #191919;
+  color: rgba(255, 255, 255, 0.9);
+  -webkit-font-smoothing: antialiased;
+}
