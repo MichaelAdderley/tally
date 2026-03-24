@@ -349,9 +349,76 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
   )
 }
 
+function getDateRange(period) {
+  const now = new Date()
+  let start, end
+  if (period === 'week') {
+    const day = now.getDay()
+    start = new Date(now)
+    start.setDate(now.getDate() - (day === 0 ? 6 : day - 1))
+    end = new Date(start)
+    end.setDate(start.getDate() + 6)
+  } else if (period === 'month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1)
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  } else {
+    start = new Date(now.getFullYear(), 0, 1)
+    end = new Date(now.getFullYear(), 11, 31)
+  }
+  return { start, end }
+}
+
+function formatDateRange(period) {
+  const { start, end } = getDateRange(period)
+  const opts = { month: 'short', day: 'numeric' }
+  const startStr = start.toLocaleDateString('en-US', opts)
+  const endStr = end.toLocaleDateString('en-US', { ...opts, year: 'numeric' })
+  return `${startStr} – ${endStr}`
+}
+
+function getHoursInPeriod(project, period) {
+  const { start, end } = getDateRange(period)
+  const startStr = start.toISOString().slice(0, 10)
+  const endStr = end.toISOString().slice(0, 10)
+  return project.logs
+    .filter(l => l.date >= startStr && l.date <= endStr)
+    .reduce((sum, l) => sum + l.hours, 0)
+}
+
+function PeriodToggle({ period, onChangePeriod }) {
+  const periods = ['week', 'month', 'year']
+  const labels = { week: 'Week', month: 'Month', year: 'Year' }
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex gap-3 items-center">
+        <span className="text-[13px] text-white/35">Showing metrics for</span>
+        <div className="bg-[#1e1e1e] border border-[#2a2a2a] flex rounded-lg p-1">
+          {periods.map(p => (
+            <button
+              key={p}
+              onClick={() => onChangePeriod(p)}
+              className={`px-4 py-1.5 rounded-md text-[13px] font-semibold cursor-pointer transition-colors ${
+                period === p
+                  ? 'bg-[#6c5ce7] text-white/95'
+                  : 'text-white/40 hover:text-white/60'
+              }`}
+            >
+              {labels[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <span className="text-[13px] font-medium text-white/30">{formatDateRange(period)}</span>
+    </div>
+  )
+}
+
 function Dashboard({ projects, onView, onEdit, onDelete, onNew }) {
+  const [period, setPeriod] = useState('month')
   const totalUsed = projects.reduce((sum, p) => sum + getUsedHours(p), 0)
   const totalBudget = projects.reduce((sum, p) => sum + p.budget, 0)
+  const periodHours = projects.reduce((sum, p) => sum + getHoursInPeriod(p, period), 0)
+  const periodLabel = { week: 'HOURS THIS WEEK', month: 'HOURS THIS MONTH', year: 'HOURS THIS YEAR' }
 
   return (
     <div className="flex-1 flex flex-col gap-7 px-10 py-10 overflow-auto">
@@ -366,9 +433,11 @@ function Dashboard({ projects, onView, onEdit, onDelete, onNew }) {
         </button>
       </div>
 
+      <PeriodToggle period={period} onChangePeriod={setPeriod} />
+
       <div className="flex gap-4">
         <StatCard value={projects.length} label="TOTAL PROJECTS" color="#6c5ce7" />
-        <StatCard value={totalUsed} label="HOURS TRACKED" color="#00b894" />
+        <StatCard value={periodHours} label={periodLabel[period]} color="#00b894" />
         <StatCard value={totalBudget} label="HOURS BUDGETED" color="#fdcb6e" />
         <StatCard value={0} label="ACTIVE TIMERS" color="#e17055" />
       </div>
