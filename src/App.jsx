@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
+import { pullFromClockify, pushToClockify } from './syncEngine'
+import SettingsModal from './SettingsModal'
 
 const PROJECT_COLORS = ['#6c5ce7', '#e17055', '#00b894', '#0984e3', '#fdcb6e', '#a29bfe', '#fd79a8']
 
@@ -19,16 +21,22 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function TopNav({ onNavigate, currentView }) {
+function TopNav({ onNavigate, currentView, syncing, lastSynced, onSync, hasClockify, onSettings }) {
   return (
     <div className="bg-[#1e1e1e] border-b border-[#2a2a2a] flex h-16 items-center justify-between px-10 shrink-0">
       <div className="flex gap-2.5 items-center cursor-pointer" onClick={() => onNavigate('dashboard')}>
         <img src={`${import.meta.env.BASE_URL}tally-logo.svg`} alt="tally logo" className="w-7 h-7" />
         <span className="font-bold text-xl text-white/90">tally</span>
       </div>
-      <div className="flex gap-6 items-center">
-        <span className={`text-sm cursor-pointer ${currentView === 'dashboard' ? 'font-semibold text-white/85' : 'text-white/45 hover:text-white/65'}`} onClick={() => onNavigate('dashboard')}>Dashboard</span>
-        <span className="text-sm text-white/45">Reports</span>
+      <div className="flex gap-4 items-center">
+        {hasClockify && (
+          <button onClick={onSync} disabled={syncing} className="text-xs text-white/40 hover:text-white/60 cursor-pointer transition-colors disabled:opacity-50">
+            {syncing ? 'Syncing...' : lastSynced ? `Synced ${lastSynced}` : 'Sync'}
+          </button>
+        )}
+        <button onClick={onSettings} className="cursor-pointer transition-opacity hover:opacity-80">
+          <img src={`${import.meta.env.BASE_URL}settings-icon.svg`} alt="Settings" className="w-4 h-4" />
+        </button>
       </div>
     </div>
   )
@@ -53,9 +61,12 @@ function ProjectRow({ project, onView, onEdit, onDelete }) {
       <div className="flex-1 flex gap-3 items-center min-w-0">
         <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: project.color }} />
         <span className="font-medium text-sm text-white/85 truncate">{project.name}</span>
+        {project.clockify_project_id && (
+          <span className="bg-[#0984e3]/15 px-1.5 py-0.5 rounded text-[9px] font-medium text-[#0984e3]/80 shrink-0">clockify</span>
+        )}
       </div>
       <div className="w-16 shrink-0 text-sm text-white/50">{project.budget}h</div>
-      <div className="w-16 shrink-0 text-sm text-white/50">{Math.max(0, project.budget - used)}h</div>
+      <div className="w-16 shrink-0 text-sm text-white/50">{Math.round(Math.max(0, project.budget - used))}h</div>
       <div className="flex gap-3 items-center w-52 shrink-0">
         <div className="bg-[#2a2a2a] h-1.5 rounded-full flex-1 overflow-hidden">
           <div className="h-1.5 rounded-full transition-all duration-300" style={{ background: project.color, width: `${barWidth}%` }} />
@@ -152,7 +163,7 @@ function DeleteModal({ project, onConfirm, onClose }) {
   )
 }
 
-function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
+function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject, clockifySettings }) {
   const used = getUsedHours(project)
   const pct = project.budget > 0 ? Math.round((used / project.budget) * 100) : 0
   const remaining = Math.max(0, project.budget - used)
@@ -185,8 +196,12 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
           .select()
           .single()
         if (!error) {
-          const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer }
+          const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer, clockifyEntryId: null }
           onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
+          // Push to Clockify if connected
+          if (clockifySettings?.clockify_api_key) {
+            pushToClockify(clockifySettings.clockify_api_key, project, { ...newLog, id: row.id })
+          }
         }
       }
       setTimerSeconds(0)
@@ -201,8 +216,12 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
       .select()
       .single()
     if (!error) {
-      const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer }
+      const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer, clockifyEntryId: null }
       onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
+      // Push to Clockify if connected
+      if (clockifySettings?.clockify_api_key) {
+        pushToClockify(clockifySettings.clockify_api_key, project, { ...newLog, id: row.id })
+      }
       setEntryHours('')
       setEntryNote('')
     }
@@ -304,6 +323,9 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
                   <span className="text-[13px] text-white/60">{formatDate(log.date)}</span>
                   {log.fromTimer && (
                     <span className="bg-[#00b894]/15 px-1.5 py-0.5 rounded text-[10px] font-medium text-[#00b894]/80">timer</span>
+                  )}
+                  {log.clockifyEntryId && (
+                    <span className="bg-[#0984e3]/15 px-1.5 py-0.5 rounded text-[10px] font-medium text-[#0984e3]/80">clockify</span>
                   )}
                 </div>
                 <span className="w-20 text-[13px] font-medium text-white/70">{log.hours}h</span>
@@ -443,6 +465,64 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState(null)
   const [modal, setModal] = useState(null)
   const [modalProject, setModalProject] = useState(null)
+  const [clockifySettings, setClockifySettings] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [lastSynced, setLastSynced] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  const showToast = useCallback((message, type = 'info') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }, [])
+
+  // Load Clockify settings from Supabase on mount
+  useEffect(() => {
+    async function loadSettings() {
+      const { data } = await supabase.from('user_settings').select('*')
+      if (data && data.length > 0) {
+        const settings = {}
+        data.forEach(row => { settings[row.key] = row.value })
+        if (settings.clockify_api_key) {
+          setClockifySettings(settings)
+        }
+      }
+    }
+    loadSettings()
+  }, [])
+
+  const handleSync = useCallback(async (settings = clockifySettings) => {
+    if (!settings?.clockify_api_key || !settings?.clockify_workspace_id || !settings?.clockify_user_id) return
+    setSyncing(true)
+    try {
+      const results = await pullFromClockify(
+        settings.clockify_api_key,
+        settings.clockify_workspace_id,
+        settings.clockify_user_id
+      )
+      await fetchProjectsRef.current()
+      const now = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      setLastSynced(now)
+      if (results.errors.length > 0) {
+        showToast(`Synced with ${results.errors.length} error(s)`, 'warning')
+      } else {
+        showToast(`Synced: ${results.projectsSynced} projects, ${results.entriesImported} new entries`, 'success')
+      }
+    } catch (err) {
+      showToast('Sync failed: ' + err.message, 'error')
+    } finally {
+      setSyncing(false)
+    }
+  }, [clockifySettings, showToast])
+
+  // Auto-sync on settings load
+  const hasSyncedRef = useRef(false)
+  useEffect(() => {
+    if (clockifySettings && !hasSyncedRef.current && !loading) {
+      hasSyncedRef.current = true
+      handleSync(clockifySettings)
+    }
+  }, [clockifySettings, loading, handleSync])
 
   const fetchProjects = useCallback(async () => {
     setLoading(true)
@@ -462,7 +542,7 @@ export default function App() {
 
     const logsByProject = {}
     for (const log of logRows) {
-      const mapped = { id: log.id, date: log.date, hours: Number(log.hours), note: log.note, fromTimer: log.from_timer }
+      const mapped = { id: log.id, date: log.date, hours: Number(log.hours), note: log.note, fromTimer: log.from_timer, clockifyEntryId: log.clockify_entry_id }
       ;(logsByProject[log.project_id] ||= []).push(mapped)
     }
 
@@ -472,12 +552,17 @@ export default function App() {
       budget: Number(p.budget),
       color: p.color,
       description: p.description,
+      clockify_project_id: p.clockify_project_id,
+      clockify_workspace_id: p.clockify_workspace_id,
       logs: logsByProject[p.id] || [],
     }))
 
     setProjects(merged)
     setLoading(false)
   }, [])
+
+  const fetchProjectsRef = useRef(fetchProjects)
+  fetchProjectsRef.current = fetchProjects
 
   useEffect(() => {
     fetchProjects()
@@ -554,7 +639,15 @@ export default function App() {
 
   return (
     <div className="bg-[#191919] flex flex-col min-h-screen max-w-[1440px] mx-auto w-full">
-      <TopNav onNavigate={(v) => { setView(v); if (v === 'dashboard') setSelectedProject(null) }} currentView={view} />
+      <TopNav
+        onNavigate={(v) => { setView(v); if (v === 'dashboard') setSelectedProject(null) }}
+        currentView={view}
+        syncing={syncing}
+        lastSynced={lastSynced}
+        onSync={() => handleSync()}
+        hasClockify={!!clockifySettings}
+        onSettings={() => setShowSettings(true)}
+      />
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-white/40 text-sm">Loading...</div>
@@ -568,6 +661,7 @@ export default function App() {
             onEdit={handleEdit}
             onDelete={handleDelete}
             onUpdateProject={handleUpdateProject}
+            clockifySettings={clockifySettings}
           />
         )
       )}
@@ -586,6 +680,33 @@ export default function App() {
           onConfirm={handleConfirmDelete}
           onClose={() => { setModal(null); setModalProject(null) }}
         />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onSave={(settings) => {
+            setClockifySettings(settings)
+            if (settings) {
+              hasSyncedRef.current = false // Allow re-sync with new settings
+              showToast('Clockify connected! Syncing...', 'success')
+            } else {
+              setLastSynced('')
+              showToast('Clockify disconnected', 'info')
+            }
+          }}
+          currentSettings={clockifySettings}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg text-sm font-medium shadow-lg transition-all"
+          style={{
+            background: toast.type === 'success' ? '#00b894' : toast.type === 'error' ? '#e17055' : toast.type === 'warning' ? '#fdcb6e' : '#6c5ce7',
+            color: toast.type === 'warning' ? '#1e1e1e' : '#fff'
+          }}>
+          {toast.message}
+        </div>
       )}
     </div>
   )
