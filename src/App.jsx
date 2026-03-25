@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from './supabaseClient'
-import { pullFromClockify, pushToClockify } from './syncEngine'
+import { pullFromClockify } from './syncEngine'
 import SettingsModal from './SettingsModal'
 
 const PROJECT_COLORS = ['#6c5ce7', '#e17055', '#00b894', '#0984e3', '#fdcb6e', '#a29bfe', '#fd79a8']
@@ -163,7 +163,7 @@ function DeleteModal({ project, onConfirm, onClose }) {
   )
 }
 
-function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject, clockifySettings }) {
+function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject }) {
   const used = getUsedHours(project)
   const pct = project.budget > 0 ? Math.round((used / project.budget) * 100) : 0
   const remaining = Math.max(0, project.budget - used)
@@ -198,10 +198,6 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject, clo
         if (!error) {
           const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer, clockifyEntryId: null }
           onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
-          // Push to Clockify if connected
-          if (clockifySettings?.clockify_api_key) {
-            pushToClockify(clockifySettings.clockify_api_key, project, { ...newLog, id: row.id })
-          }
         }
       }
       setTimerSeconds(0)
@@ -218,10 +214,6 @@ function ProjectDetail({ project, onBack, onEdit, onDelete, onUpdateProject, clo
     if (!error) {
       const newLog = { id: row.id, date: row.date, hours: Number(row.hours), note: row.note, fromTimer: row.from_timer, clockifyEntryId: null }
       onUpdateProject({ ...project, logs: [newLog, ...project.logs] })
-      // Push to Clockify if connected
-      if (clockifySettings?.clockify_api_key) {
-        pushToClockify(clockifySettings.clockify_api_key, project, { ...newLog, id: row.id })
-      }
       setEntryHours('')
       setEntryNote('')
     }
@@ -661,7 +653,6 @@ export default function App() {
             onEdit={handleEdit}
             onDelete={handleDelete}
             onUpdateProject={handleUpdateProject}
-            clockifySettings={clockifySettings}
           />
         )
       )}
